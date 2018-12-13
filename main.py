@@ -1,85 +1,26 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+"""run as a scheduled heroku job to send out emails 
+for the duos reasearch study"""
+
+
 import sendgrid
 import os
 
-from sqlalchemy.engine.url import URL
-from sqlalchemy import create_engine, MetaData, select
-
-from sqlalchemy import (
-    create_engine,
-    Table,
-    Column,
-    Integer,
-    String,
-    DateTime,
-    MetaData,
-    ForeignKey,
-)
-
-connstr = URL(
-    **{
-        "drivername": "postgres",
-        "username": os.getenv("DB_USER"),
-        "password": os.getenv("DB_PASSWORD"),
-        "host": os.getenv("DB_HOST"),
-        "port": os.getenv("DB_PORT"),
-        "database": os.getenv("DB_NAME"),
-    }
-)
-engine = create_engine(connstr)
-metadata = MetaData()
-metadata.reflect(bind=engine)
-conn = engine.connect()
-
-wr = metadata.tables["writes"]
-ar = metadata.tables["article"]
-au = metadata.tables["author"]
-
-join = wr.join(au, au.c.author_id == wr.c.author_id).join(
-    ar, ar.c.article_id == wr.c.article_id
-)
-
-result = conn.execute(
-    select(
-        [ar.c.article_title, wr.c.writes_hash, au.c.author_name, au.c.email_address]
-    ).select_from(join)
-)
+from db import fetch_email_recipients
+from plumbing import compose_sendgrid_post_body, iter_make_recipient
 
 
-def iter_make_recipient(recipient_iterable):
-    for recipient in recipient_iterable:
-        yield {
-            "paper_title": recipient[0],
-            "url_hash": recipient[1],
-            "name": recipient[2],
-            "email": recipient[3],
+CONSTANTS = {
+    "SUBJECT": "WOW OKAY DUDE",
+    "FROM_EMAIL": "yooo@example.com",
+    "CONTENT": [
+        {
+            "type": "text/plain",
+            "value": "Hello, -author_name-  What's up with your paper called -paper_title- answer my question at -url_hash-",
         }
-
-
-def compose_sendgrid_post_body(recipients_with_details=[], subject="", from_email=""):
-    return {
-        "personalizations": [
-            {
-                "to": [{"email": recipient["email"]}],
-                "subject": subject,
-                "substitutions": {
-                    "-author_name-": recipient["name"],
-                    "-paper_title-": recipient["paper_title"],
-                    "-url_hash-": recipient["url_hash"],
-                },
-            }
-            for recipient in recipients_with_details
-        ],
-        "from": {"email": from_email},
-        "content": [
-            {
-                "type": "text/plain",
-                "value": "Hello, -author_name-  What's up with your paper called -paper_title- answer my question at -url_hash-",
-            }
-        ],
-    }
-
+    ],
+}
 
 sg = sendgrid.SendGridAPIClient(apikey=os.getenv("SENDGRID_API_KEY"))
 
@@ -88,12 +29,15 @@ response = sg.client.mail.send.post(
         **{
             "recipients_with_details": [
                 record
-                for record in iter_make_recipient(result.fetchall())
+                for record in iter_make_recipient(fetch_email_recipients())
                 if record["email"] is not None
             ],
-            "subject": "WOW OKAY DUDE",
-            "from_email": "test@example.com",
+            "subject": CONSTANTS["SUBJECT"],
+            "from_email": CONSTANTS["FROM_EMAIL"],
+            "content": CONSTANTS["CONTENT"],
         }
     )
 )
-print(response.status_code)
+
+print(f"{'Success 🙌' if response.status_code == 202 or 200 else 'Uh oh 🙀'}")
+print(f"Response code: {response.status_code}")
