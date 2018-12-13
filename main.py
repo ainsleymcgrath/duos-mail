@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """run as a scheduled heroku job to send out emails 
-for the duos reasearch study"""
+for the duos research study"""
 
 
 import sendgrid
